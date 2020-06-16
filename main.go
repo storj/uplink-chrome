@@ -39,7 +39,10 @@ func UploadAndDownloadData(ctx context.Context,
 	// Request access grant to the satellite with the API key and passphrase.
 	myConfig := uplink.Config{
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return &jsConn{}, nil
+			return &jsConn{
+				ip:   "127.0.0.1",
+				port: "10000",
+			}, nil
 		},
 	}
 	access, err := myConfig.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
@@ -108,6 +111,8 @@ func UploadAndDownloadData(ctx context.Context,
 }
 
 type jsConn struct {
+	ip   string
+	port string
 }
 
 var uint8Array = js.Global().Get("Uint8Array")
@@ -124,7 +129,7 @@ func (c *jsConn) Read(b []byte) (n int, err error) {
 func (c *jsConn) Write(b []byte) (n int, err error) {
 	buf := uint8Array.New(len(b))
 	js.CopyBytesToJS(buf, b)
-	js.Global().Call("socketWrite", buf)
+	js.Global().Call("socketWrite", c.ip, c.port, buf)
 	return 0, nil
 }
 func (c *jsConn) Close() error {
