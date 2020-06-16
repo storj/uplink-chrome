@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
+	"syscall/js"
+	"time"
 
 	"storj.io/uplink"
 )
@@ -14,6 +17,9 @@ func main() {
 	var satellite string
 	var passphrase string
 	var apikey string
+	apikey = "13Yqcux9BQu4C1DyHjUbXispLV3qcTRws2NrGjBzi8MWZ4zLVBkZES3FPRD88y7ercGKKCDi7ud4aMEd2szmjL8HDYXXxEmXJs97CvQ"
+	satellite = "12Wz6wJihX8yrnYht21kokZNiorNcLY5i5ai61sTLBR7qEhNqbi@127.0.0.1:10000"
+	passphrase = "testpass"
 
 	err := UploadAndDownloadData(context.Background(), satellite, apikey, passphrase,
 		"my-first-bucket", "foo/bar/baz", []byte("one fish two fish red fish blue fish"))
@@ -31,10 +37,21 @@ func UploadAndDownloadData(ctx context.Context,
 	dataToUpload []byte) error {
 
 	// Request access grant to the satellite with the API key and passphrase.
-	access, err := uplink.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
+	myConfig := uplink.Config{
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return &jsConn{}, nil
+		},
+	}
+	access, err := myConfig.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
 	if err != nil {
 		return fmt.Errorf("could not request access grant: %v", err)
 	}
+	/*
+		access, err := uplink.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
+		if err != nil {
+			return fmt.Errorf("could not request access grant: %v", err)
+		}
+	*/
 
 	// Open up the Project we will be working with.
 	project, err := uplink.OpenProject(ctx, access)
@@ -88,4 +105,59 @@ func UploadAndDownloadData(ctx context.Context,
 	}
 
 	return nil
+}
+
+type jsConn struct {
+}
+
+var uint8Array = js.Global().Get("Uint8Array")
+
+func (c *jsConn) Read(b []byte) (n int, err error) {
+	fmt.Println("read")
+	retVal := js.Global().Call("socketFunc", 2)
+	fmt.Println("received")
+	fmt.Println(retVal)
+	js.CopyBytesToGo(b, retVal)
+	fmt.Println(b)
+	return retVal.Get("byteLength").Int(), nil
+}
+func (c *jsConn) Write(b []byte) (n int, err error) {
+	buf := uint8Array.New(len(b))
+	js.CopyBytesToJS(buf, b)
+	js.Global().Call("socketWrite", buf)
+	return 0, nil
+}
+func (c *jsConn) Close() error {
+	fmt.Println("close")
+	return nil
+}
+func (c *jsConn) LocalAddr() net.Addr {
+	fmt.Println("local addr")
+	return &addr{}
+}
+func (c *jsConn) RemoteAddr() net.Addr {
+	fmt.Println("remote addr")
+	return &addr{}
+}
+func (c *jsConn) SetDeadline(t time.Time) error {
+	fmt.Println("set deadline")
+	return nil
+}
+func (c *jsConn) SetReadDeadline(t time.Time) error {
+	fmt.Println("set read deadline")
+	return nil
+}
+func (c *jsConn) SetWriteDeadline(t time.Time) error {
+	fmt.Println("set write deadline")
+	return nil
+}
+
+type addr struct {
+}
+
+func (*addr) Network() string {
+	return ""
+}
+func (*addr) String() string {
+	return ""
 }
