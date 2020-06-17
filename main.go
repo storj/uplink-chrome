@@ -120,17 +120,16 @@ var uint8Array = js.Global().Get("Uint8Array")
 func (c *jsConn) Read(b []byte) (n int, err error) {
 	fmt.Println("read")
 	retVal := js.Global().Call("socketRead", 2)
-	fmt.Println("received")
-	fmt.Println(retVal)
+	fmt.Println("received bytes")
 	js.CopyBytesToGo(b, retVal)
-	fmt.Println(b)
+	fmt.Println(retVal.Get("bytelength").Int())
 	return retVal.Get("byteLength").Int(), nil
 }
 func (c *jsConn) Write(b []byte) (n int, err error) {
 	buf := uint8Array.New(len(b))
 	js.CopyBytesToJS(buf, b)
 	js.Global().Call("socketWrite", c.ip, c.port, buf)
-	return 0, nil
+	return len(b), nil
 }
 func (c *jsConn) Close() error {
 	fmt.Println("close")
