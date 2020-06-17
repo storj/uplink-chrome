@@ -119,7 +119,7 @@ var uint8Array = js.Global().Get("Uint8Array")
 
 func (c *jsConn) Read(b []byte) (n int, err error) {
 	fmt.Println("read")
-	retVal := js.Global().Call("socketFunc", 2)
+	retVal := js.Global().Call("socketRead", 2)
 	fmt.Println("received")
 	fmt.Println(retVal)
 	js.CopyBytesToGo(b, retVal)
