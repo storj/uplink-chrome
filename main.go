@@ -122,8 +122,8 @@ func (c *jsConn) Read(b []byte) (n int, err error) {
 	retVal := js.Global().Call("socketRead", 2)
 	fmt.Println("received bytes")
 	js.CopyBytesToGo(b, retVal)
-	fmt.Println(retVal.Get("bytelength").Int())
-	return retVal.Get("byteLength").Int(), nil
+	fmt.Println(retVal.Length())
+	return retVal.Length(), nil
 }
 func (c *jsConn) Write(b []byte) (n int, err error) {
 	buf := uint8Array.New(len(b))

@@ -1,7 +1,7 @@
 console.log("in sockets.js")
 
 var socketId = ""
-var readData = []
+var readData = new Uint8Array([])
 
 function socketRead(x) {
     console.log('socket read ')
@@ -9,9 +9,8 @@ function socketRead(x) {
         console.log("after timeout")
     }, 2000)
     console.log(readData.length)
-    x = new Uint8Array(readData)
-    readData = []
-    return x;
+    readData = new Uint8Array([])
+    return readData;
 }
 
 function socketWrite(ip, port, buf) {
@@ -38,9 +37,7 @@ function socketWrite(ip, port, buf) {
 
 }
 function onReceiveCallback(info) {
-    console.log("on receive callback")
-    console.log("setting read data")
-    readData = info.data
+    readData  = new Uint8Array(info.data)
     console.log(readData.length)
 }
 function onSentCallback() {
