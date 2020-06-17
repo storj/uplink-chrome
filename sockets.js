@@ -1,52 +1,78 @@
 console.log("in sockets.js")
 
+var socketConns = {}
 var socketId = ""
 var readData = new Uint8Array([])
 
-function socketRead(bytesRequested, done) {
-    console.log('socket read ')
+chrome.sockets.tcp.onReceive.addListener(onReceiveCallback)
+
+function socketRead(ip, port, bytesRequested, done) {
+    console.log('socket read (JS)')
+    addr = ip + ":" + port
+    bufferInfo = socketConns[addr]
+    if (!bufferInfo) {
+        return
+    }
     setTimeout(function() {
-        console.log("after timeout")
-        console.log("length of read data")
-        console.log(readData.length)
-        toSend = readData
-        if (readData.length > bytesRequested) {
-            toSend = readData.slice(0, bytesRequested)
-            readData = readData.slice(bytesRequested)
+        toSend = bufferInfo.readData
+        if (bufferInfo.readData.length > bytesRequested) {
+            toSend = bufferInfo.readData.slice(0, bytesRequested)
+            bufferInfo.readData = bufferInfo.readData.slice(bytesRequested)
         }
+        console.log('socket read end (JS); sending bytes: ' + toSend.length)
         done(toSend)
-    }, 100)
+    }, 0)
     return;
 }
 
 function socketWrite(ip, port, buf, done) {
-    console.log("socket write " + buf)
-    if (socketId == "") {
+    console.log("socket write (JS): " + buf.length)
+    addr = ip + ":" + port
+    bufferInfo = socketConns[addr]
+    if (!bufferInfo) {
         chrome.sockets.tcp.create({}, function(createInfo) {
+            socketConns[addr] = {
+                id: createInfo.socketId,
+                readData: new Uint8Array([])
+            }
+            console.log('set socketCoons ' + addr)
             socketId = createInfo.socketId
-            chrome.sockets.tcp.connect(socketId, ip, 10000, function(result) {
+            chrome.sockets.tcp.connect(socketId, ip, parseInt(port), function(result) {
                 chrome.sockets.tcp.send(socketId, buf, function() {
-                    console.log("tcp message sent")
+                    console.log("tcp message sent (JS)")
                     done()
                 });
             });
-            chrome.sockets.tcp.onReceive.addListener(onReceiveCallback)
         });
+
     } else {
-        chrome.sockets.tcp.send(socketId, buf, function() {
-            console.log("tcp message sent")
+        chrome.sockets.tcp.send(bufferInfo.id, buf, function() {
+            console.log("tcp message sent (JS)")
             done()
         });
     }
 }
 function onReceiveCallback(info) {
-    console.log(info)
-    readData  = new Uint8Array(info.data)
-    console.log(readData.length)
+    for (let [key, item] of Object.entries(socketConns)) {
+        if (item.id == info.socketId) {
+            var newData = new Uint8Array(info.data)
+            var tmp = new Uint8Array(item.readData.byteLength + newData.byteLength);
+            tmp.set(new Uint8Array(item.readData), 0);
+            tmp.set(new Uint8Array(newData), item.readData.byteLength);
+            item.readData = tmp
+        }
+    }
 }
 function onSentCallback() {
-    console.log("onsentcallback")
 }
 function onConnectedCallback() {
-    console.log("onconnectedcallback")
+}
+function socketDisconnect(ip, port, done) {
+    console.log('disconnect socket')
+    var addr = ip + ":" + port
+    if (socketConns[addr]) {
+        chrome.sockets.tcp.disconnect(socketConns[addr].id, done)
+    } else {
+        done()
+    }
 }

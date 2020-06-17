@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"strings"
 	"syscall/js"
 	"time"
 
@@ -27,7 +28,7 @@ func main() {
 		fmt.Println("error:", err)
 	}
 
-	fmt.Println("success!")
+	//fmt.Println("success!")
 }
 
 // UploadAndDownloadData uploads the specified data to the specified key in the
@@ -39,9 +40,13 @@ func UploadAndDownloadData(ctx context.Context,
 	// Request access grant to the satellite with the API key and passphrase.
 	myConfig := uplink.Config{
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			fmt.Println("dial context")
+			addressParts := strings.Split(address, ":")
+			fmt.Println(addressParts[0])
+			fmt.Println(addressParts[1])
 			return &jsConn{
-				ip:   "127.0.0.1",
-				port: "10000",
+				ip:   addressParts[0],
+				port: addressParts[1],
 			}, nil
 		},
 	}
@@ -49,6 +54,7 @@ func UploadAndDownloadData(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("could not request access grant: %v", err)
 	}
+	fmt.Println("\n\n>>> access grant requested successfully <<<\n")
 	/*
 		access, err := uplink.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
 		if err != nil {
@@ -119,20 +125,22 @@ var uint8Array = js.Global().Get("Uint8Array")
 
 func (c *jsConn) Read(b []byte) (n int, err error) {
 	reading := make(chan struct{})
-	fmt.Println("read")
+	fmt.Println("read start (Go)")
 	var retVal js.Value
-	js.Global().Call("socketRead", len(b), js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	js.Global().Call("socketRead", c.ip, c.port, len(b), js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		retVal = args[0]
 		close(reading)
 		return nil
 	}))
 	<-reading
-	fmt.Println("received bytes")
+	fmt.Println("received read bytes (Go):")
 	js.CopyBytesToGo(b, retVal)
 	fmt.Println(retVal.Length())
 	return retVal.Length(), nil
 }
 func (c *jsConn) Write(b []byte) (n int, err error) {
+	fmt.Println("write start (Go):")
+	fmt.Println(len(b))
 	buf := uint8Array.New(len(b))
 	js.CopyBytesToJS(buf, b)
 
@@ -142,10 +150,18 @@ func (c *jsConn) Write(b []byte) (n int, err error) {
 		return nil
 	}))
 	<-writing
+	fmt.Println("write end (Go)")
 	return len(b), nil
 }
 func (c *jsConn) Close() error {
-	fmt.Println("close")
+	fmt.Println("closing socket (Go)")
+
+	closing := make(chan struct{})
+	js.Global().Call("socketDisconnect", c.ip, c.port, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		close(closing)
+		return nil
+	}))
+	<-closing
 	return nil
 }
 func (c *jsConn) LocalAddr() net.Addr {
