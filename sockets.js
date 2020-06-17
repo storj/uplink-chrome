@@ -15,7 +15,7 @@ function socketRead(bytesRequested, done) {
             readData = readData.slice(bytesRequested)
         }
         done(toSend)
-    }, 500)
+    }, 100)
     return;
 }
 
@@ -40,6 +40,7 @@ function socketWrite(ip, port, buf, done) {
     }
 }
 function onReceiveCallback(info) {
+    console.log(info)
     readData  = new Uint8Array(info.data)
     console.log(readData.length)
 }

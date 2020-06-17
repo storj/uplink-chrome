@@ -57,7 +57,7 @@ func UploadAndDownloadData(ctx context.Context,
 	*/
 
 	// Open up the Project we will be working with.
-	project, err := uplink.OpenProject(ctx, access)
+	project, err := myConfig.OpenProject(ctx, access)
 	if err != nil {
 		return fmt.Errorf("could not open project: %v", err)
 	}
