@@ -118,8 +118,15 @@ type jsConn struct {
 var uint8Array = js.Global().Get("Uint8Array")
 
 func (c *jsConn) Read(b []byte) (n int, err error) {
+	reading := make(chan struct{})
 	fmt.Println("read")
-	retVal := js.Global().Call("socketRead", 2)
+	var retVal js.Value
+	js.Global().Call("socketRead", len(b), js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		retVal = args[0]
+		close(reading)
+		return nil
+	}))
+	<-reading
 	fmt.Println("received bytes")
 	js.CopyBytesToGo(b, retVal)
 	fmt.Println(retVal.Length())
@@ -128,7 +135,13 @@ func (c *jsConn) Read(b []byte) (n int, err error) {
 func (c *jsConn) Write(b []byte) (n int, err error) {
 	buf := uint8Array.New(len(b))
 	js.CopyBytesToJS(buf, b)
-	js.Global().Call("socketWrite", c.ip, c.port, buf)
+
+	writing := make(chan struct{})
+	js.Global().Call("socketWrite", c.ip, c.port, buf, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		close(writing)
+		return nil
+	}))
+	<-writing
 	return len(b), nil
 }
 func (c *jsConn) Close() error {
