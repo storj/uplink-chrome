@@ -19,6 +19,7 @@ function socketWrite(ip, port, buf) {
                         resolve()
                     });
                 });
+                chrome.sockets.tcp.onReceive.addListener(onReceiveCallback)
             });
         } else {
             chrome.sockets.tcp.send(socketId, buf, function() {
@@ -28,6 +29,10 @@ function socketWrite(ip, port, buf) {
         }
     });
 
+}
+function onReceiveCallback(info) {
+    console.log("on receive callback")
+    console.log(info)
 }
 function onSentCallback() {
     console.log("onsentcallback")
