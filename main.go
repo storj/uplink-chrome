@@ -1,3 +1,5 @@
+// +build js
+
 package main
 
 import (
@@ -7,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"syscall/js"
 	"time"
@@ -15,6 +18,83 @@ import (
 )
 
 func main() {
+	jsCallbackFuncName := os.Args[1]
+
+	wait := make(chan struct{})
+	err := initApp(jsCallbackFuncName)
+	if err != nil {
+		exit(err)
+	}
+
+	<-wait
+}
+
+// initApp initializes the application registering what's needed in the browser.
+// It returns an error if the `storjGo` browser global variable is already
+// defined.
+func initApp(jsCallbackFuncName string) error {
+	g := js.Global()
+	cb := g.Get(jsCallbackFuncName)
+	if cb.Type() != js.TypeFunction {
+		return fmt.Errorf(
+			"expectation violation: %s isn't a function declared in the global object",
+			jsCallbackFuncName,
+		)
+	}
+
+	sg := map[string]interface{}{
+		"funcs": map[string]interface{}{},
+	}
+
+	// register the Go functions availabe in the browser
+	sgFns := sg["funcs"].(map[string]interface{})
+
+	/*
+		sgFns["access"] = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			//		satAddr := args[0].String()
+			//		apiKey := args[1].String()
+			//		passphrase := args[2].String()
+			println(this.Get("name").String(), args[0].String(), args[1].Bool(), args[2].Int())
+			println(reflect.TypeOf(js.Value{}).Name())
+			println(reflect.TypeOf(js.Value{}).PkgPath())
+			return uint64(10)
+
+			//		return access(satAddr, apiKey, passphrase)
+		})
+	*/
+
+	fn, err := funcToJS(access)
+	if err != nil {
+		return err
+	}
+	sgFns["access"] = fn
+
+	fn, err = funcToJS(accessThis)
+	if err != nil {
+		return err
+	}
+	sgFns["accessThis"] = fn
+
+	fn, err = funcToJS(different)
+	if err != nil {
+		return err
+	}
+	sgFns["different"] = fn
+
+	_ = cb.Invoke(sg)
+	return nil
+}
+
+func exit(err error) {
+	if err != nil {
+		println("fatal error:", err.Error())
+		os.Exit(1)
+	}
+
+	os.Exit(0)
+}
+
+func mainOld() {
 	var satellite string
 	var passphrase string
 	var apikey string
