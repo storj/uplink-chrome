@@ -1,78 +1,87 @@
 console.log("in sockets.js")
 
-var socketConns = {}
-var socketId = ""
-var readData = new Uint8Array([])
+var apikey = "13YqeL9Pd4FUpSMedjGo7BhxfQod8wE1S1KjJoUwYvRqBEHvsJtSDgF4QuxNRPmqfGLQV7AEZq6TDrBxZck3GHxQvujfomvpQuTgzqz";
+var satellite = "1wKcviARJh1xUDKnAVT9RQY7UoFDVxtyj3mYSU7jyznbPmZX7P@127.0.0.1:10000";
+var passphrase = "testpass";
+var Reads = {}
 
-chrome.sockets.tcp.onReceive.addListener(onReceiveCallback)
+function socketConnect(ip, port, callback) {
+    console.log("socketConnect 1 (JS): " + ip + " : " + port)
+    chrome.sockets.tcp.create({}, function (createInfo) {
+        console.log("socketConnect 2 (JS): " + ip + " : " + port)
+        chrome.sockets.tcp.connect(createInfo.socketId, ip, parseInt(port), function (result) {
+            if (result >= 0) {
+                Reads[createInfo.socketId] = {
+                    data: new Uint8Array(0),
+                    EOF: false
+                }
+            }
+            console.log("socketConnect 3 (JS): #" + createInfo.socketId + " : " + result)
+            callback(createInfo.socketId, result)
+        });
+    });
+}
 
-function socketRead(ip, port, bytesRequested, done) {
-    console.log('socket read (JS)')
-    addr = ip + ":" + port
-    bufferInfo = socketConns[addr]
-    if (!bufferInfo) {
+function socketRead(id, bytesRequested, callback) {
+    if (bytesRequested == 0) {
+        callback(new Uint8Array(0), false);
         return
     }
-    setTimeout(function() {
-        toSend = bufferInfo.readData
-        if (bufferInfo.readData.length > bytesRequested) {
-            toSend = bufferInfo.readData.slice(0, bytesRequested)
-            bufferInfo.readData = bufferInfo.readData.slice(bytesRequested)
-        }
-        console.log('socket read end (JS); sending bytes: ' + toSend.length)
-        done(toSend)
-    }, 0)
-    return;
-}
-
-function socketWrite(ip, port, buf, done) {
-    console.log("socket write (JS): " + buf.length)
-    addr = ip + ":" + port
-    bufferInfo = socketConns[addr]
-    if (!bufferInfo) {
-        chrome.sockets.tcp.create({}, function(createInfo) {
-            socketConns[addr] = {
-                id: createInfo.socketId,
-                readData: new Uint8Array([])
-            }
-            console.log('set socketCoons ' + addr)
-            socketId = createInfo.socketId
-            chrome.sockets.tcp.connect(socketId, ip, parseInt(port), function(result) {
-                chrome.sockets.tcp.send(socketId, buf, function() {
-                    console.log("tcp message sent (JS)")
-                    done()
-                });
-            });
-        });
-
+    console.log('read (JS) #' + id + ' : ' + Reads[id].data.length + " bytes")
+    var toSend = Reads[id].data;
+    if (Reads[id].data.length > bytesRequested) {
+        toSend = Reads[id].data.slice(0, bytesRequested)
+        Reads[id].data = Reads[id].data.slice(bytesRequested)
     } else {
-        chrome.sockets.tcp.send(bufferInfo.id, buf, function() {
-            console.log("tcp message sent (JS)")
-            done()
-        });
+        toSend = Reads[id].data
+        Reads[id].data = new Uint8Array(0)
     }
+    //force other functions to be allowed to run
+    setTimeout(function () { callback(toSend, Reads[id].EOF); }, 1);
 }
-function onReceiveCallback(info) {
-    for (let [key, item] of Object.entries(socketConns)) {
-        if (item.id == info.socketId) {
-            var newData = new Uint8Array(info.data)
-            var tmp = new Uint8Array(item.readData.byteLength + newData.byteLength);
-            tmp.set(new Uint8Array(item.readData), 0);
-            tmp.set(new Uint8Array(newData), item.readData.byteLength);
-            item.readData = tmp
-        }
+
+function socketWrite(id, buf, callback) {
+    let idInt = parseInt(id);
+    console.log("socket write (JS) #" + id + ' : ' + buf.length + " bytes")
+    chrome.sockets.tcp.send(idInt, buf, function () {
+        callback(0, buf.length)
+    });
+}
+
+function socketDisconnect(id, callback) {
+    console.log('disconnect socket #' + id)
+    // chrome.sockets.tcp.getInfo(id, function (socketInfo) {
+    //     console.log('disconnect socket #' + id + " : " + (socketInfo.connected ? "connected" : "disconnected"))
+    //     if (socketInfo.connected && !Reads[id].EOF) {
+    chrome.sockets.tcp.disconnect(id, callback)
+    //     }
+    // })
+}
+
+chrome.sockets.tcp.onReceive.addListener(onReceive)
+function onReceive(info) {
+    let id = info.socketId;
+    let item = Reads[id].data;
+    if (info.data.byteLength == 0) {
+        console.log("zero length in #" + id)
+        Reads[id].EOF = true;
     }
+    console.log("onReceive on " + info)
+    var newData = new Uint8Array(info.data)
+    var tmp = new Uint8Array(item.byteLength + newData.byteLength);
+    tmp.set(new Uint8Array(item), 0);
+    tmp.set(new Uint8Array(newData), item.byteLength);
+    Reads[id].data = tmp
 }
+
+chrome.sockets.tcp.onReceiveError.addListener(onReceiveError)
+function onReceiveError(info) {
+    Reads[info.socketId].EOF = true;
+    console.log("onReceiveError in #" + info.socketId + ' : ' + netError(info.resultCode));
+}
+
 function onSentCallback() {
 }
 function onConnectedCallback() {
 }
-function socketDisconnect(ip, port, done) {
-    console.log('disconnect socket')
-    var addr = ip + ":" + port
-    if (socketConns[addr]) {
-        chrome.sockets.tcp.disconnect(socketConns[addr].id, done)
-    } else {
-        done()
-    }
-}
+

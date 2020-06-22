@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"strconv"
 	"strings"
 	"syscall/js"
 	"time"
@@ -15,20 +16,17 @@ import (
 )
 
 func main() {
-	var satellite string
-	var passphrase string
-	var apikey string
-	apikey = "13Yqcux9BQu4C1DyHjUbXispLV3qcTRws2NrGjBzi8MWZ4zLVBkZES3FPRD88y7ercGKKCDi7ud4aMEd2szmjL8HDYXXxEmXJs97CvQ"
-	satellite = "12Wz6wJihX8yrnYht21kokZNiorNcLY5i5ai61sTLBR7qEhNqbi@127.0.0.1:10000"
-	passphrase = "testpass"
+	apikey := js.Global().Get("apikey").String()
+	satellite := js.Global().Get("satellite").String()
+	passphrase := js.Global().Get("passphrase").String()
 
 	err := UploadAndDownloadData(context.Background(), satellite, apikey, passphrase,
 		"my-first-bucket", "foo/bar/baz", []byte("one fish two fish red fish blue fish"))
 	if err != nil {
 		fmt.Println("error:", err)
 	}
-
-	//fmt.Println("success!")
+	//run indefinitely
+	select {}
 }
 
 // UploadAndDownloadData uploads the specified data to the specified key in the
@@ -42,12 +40,8 @@ func UploadAndDownloadData(ctx context.Context,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			fmt.Println("dial context")
 			addressParts := strings.Split(address, ":")
-			fmt.Println(addressParts[0])
-			fmt.Println(addressParts[1])
-			return &jsConn{
-				ip:   addressParts[0],
-				port: addressParts[1],
-			}, nil
+			port, _ := strconv.Atoi(addressParts[1])
+			return NewJsConn(addressParts[0], port)
 		},
 	}
 	access, err := myConfig.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
@@ -112,40 +106,66 @@ func UploadAndDownloadData(ctx context.Context,
 	if !bytes.Equal(receivedContents, dataToUpload) {
 		return fmt.Errorf("got different object back: %q != %q", dataToUpload, receivedContents)
 	}
+	fmt.Printf("**** got back \"%s\" ****\n", string(receivedContents))
 
 	return nil
 }
 
-type jsConn struct {
+//JsConn is a javascript thing
+type JsConn struct {
 	ip   string
-	port string
+	port int
+	id   int
 }
 
 var uint8Array = js.Global().Get("Uint8Array")
 
-func (c *jsConn) Read(b []byte) (n int, err error) {
+//NewJsConn returns a new JsConn
+func NewJsConn(ip string, port int) (*JsConn, error) {
+	creating := make(chan struct{})
+	fmt.Println("connect start (Go)")
+	var socketID, resultCode js.Value
+	js.Global().Call("socketConnect", ip, port, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		socketID = args[0]
+		resultCode = args[1]
+		fmt.Printf("connect close (Go) #%d\n", socketID.Int())
+		close(creating)
+		return nil
+	}))
+	<-creating
+	fmt.Printf("connect (Go) socket id = %s\n", socketID.String())
+	return &JsConn{ip: ip, port: port, id: socketID.Int()}, nil
+}
+
+func (c *JsConn) Read(b []byte) (n int, err error) {
 	reading := make(chan struct{})
 	fmt.Println("read start (Go)")
-	var retVal js.Value
-	js.Global().Call("socketRead", c.ip, c.port, len(b), js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	var retVal, eof js.Value
+	js.Global().Call("socketRead", c.id, len(b), js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		retVal = args[0]
+		eof = args[1]
+		fmt.Printf("read close (Go) #%d\n", c.id)
 		close(reading)
 		return nil
 	}))
 	<-reading
 	fmt.Println("received read bytes (Go):")
 	js.CopyBytesToGo(b, retVal)
-	fmt.Println(retVal.Length())
+	if eof.Bool() {
+		fmt.Printf("EOF (Go) #%d\n", c.id)
+		return retVal.Length(), io.EOF
+	}
 	return retVal.Length(), nil
 }
-func (c *jsConn) Write(b []byte) (n int, err error) {
+
+func (c *JsConn) Write(b []byte) (n int, err error) {
 	fmt.Println("write start (Go):")
 	fmt.Println(len(b))
 	buf := uint8Array.New(len(b))
 	js.CopyBytesToJS(buf, b)
 
 	writing := make(chan struct{})
-	js.Global().Call("socketWrite", c.ip, c.port, buf, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	js.Global().Call("socketWrite", c.id, buf, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		close(writing)
 		return nil
 	}))
@@ -153,34 +173,34 @@ func (c *jsConn) Write(b []byte) (n int, err error) {
 	fmt.Println("write end (Go)")
 	return len(b), nil
 }
-func (c *jsConn) Close() error {
+func (c *JsConn) Close() error {
 	fmt.Println("closing socket (Go)")
 
 	closing := make(chan struct{})
-	js.Global().Call("socketDisconnect", c.ip, c.port, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	js.Global().Call("socketDisconnect", c.id, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		close(closing)
 		return nil
 	}))
 	<-closing
 	return nil
 }
-func (c *jsConn) LocalAddr() net.Addr {
+func (c *JsConn) LocalAddr() net.Addr {
 	fmt.Println("local addr")
 	return &addr{}
 }
-func (c *jsConn) RemoteAddr() net.Addr {
+func (c *JsConn) RemoteAddr() net.Addr {
 	fmt.Println("remote addr")
 	return &addr{}
 }
-func (c *jsConn) SetDeadline(t time.Time) error {
+func (c *JsConn) SetDeadline(t time.Time) error {
 	fmt.Println("set deadline")
 	return nil
 }
-func (c *jsConn) SetReadDeadline(t time.Time) error {
+func (c *JsConn) SetReadDeadline(t time.Time) error {
 	fmt.Println("set read deadline")
 	return nil
 }
-func (c *jsConn) SetWriteDeadline(t time.Time) error {
+func (c *JsConn) SetWriteDeadline(t time.Time) error {
 	fmt.Println("set write deadline")
 	return nil
 }
