@@ -1,8 +1,13 @@
 console.log("in sockets.js")
 
-var apikey = "13YqgBsPw9cwbLNHtw5U52FTjPE8xaMU5PUEE5Vi2t6dhfThA5AqJGvY1rXqHTUM6bWATMWx1rywRhfatEmXLUSe6qSE4x7bmvEvZvF";
-var satellite = "12ndYNoiwjW8zygsvLKEq9GEckV81W6mL6vQ2QgTeSpuimFWfLf@127.0.0.1:10000";
+var apikey = "13YqfsGkZihxEidgymNGeuufP2YrFpgR7yxoqh9DwAARGA5qbBbk21VMfoB4oN9udeZQ6L6VWnr9rhEMTzpDAyf5dSBpB4pMsXni5HS";
+var satellite = "1wKcviARJh1xUDKnAVT9RQY7UoFDVxtyj3mYSU7jyznbPmZX7P@127.0.0.1:10000";
 var passphrase = "testpass";
+var Upload = function () { };
+var Download = function () { };
+document.getElementById("Upload").onclick = function () { Upload(); };
+document.getElementById("Download").onclick = function () { Download(); };
+
 
 class Socket {
     constructor(info) {
@@ -97,12 +102,16 @@ function dialContext(ip, port, connected, failed) {
 }
 
 function writeSocket(id, data, wrote, failed) {
+    console.log("here")
     let sock = alive[id];
     chrome.sockets.tcp.send(sock.id, data, function (sendInfo) {
+        console.log("here 2")
         if (sendInfo.result < 0) {
+            console.log("here 3")
             failed(sendInfo.bytesSent);
             return;
         }
+        console.log("here 4")
         wrote(sendInfo.bytesSent);
     });
 }

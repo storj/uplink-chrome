@@ -19,23 +19,40 @@ func main() {
 	apikey := js.Global().Get("apikey").String()
 	satellite := js.Global().Get("satellite").String()
 	passphrase := js.Global().Get("passphrase").String()
+	bucket := "test-bucket"
+	path := "from/the/web"
+	dataToUpload := []byte("one fish two fish red fish blue fish")
+	ctx := context.Background()
 	fmt.Println("starting")
-
-	err := UploadAndDownloadData(context.Background(), satellite, apikey, passphrase,
-		"my-first-bucket", "foo/bar/baz", []byte("one fish two fish red fish blue fish"))
+	//make sure the connection parameters are all good
+	project, err := PrepareBucket(ctx, satellite, apikey, passphrase, bucket)
 	if err != nil {
 		fmt.Println("error:", err)
 	}
+	defer project.Close()
+	//create JavaScript functions for upload and download
+	js.Global().Set("Upload", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		fmt.Println("Upload")
+		err := UploadData(ctx, project, bucket, path, dataToUpload)
+		if err != nil {
+			fmt.Println("error:", err)
+		}
+		return nil
+	}))
+	js.Global().Set("Download", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		fmt.Println("Download")
+		_, err := DownloadData(ctx, project, bucket, path, dataToUpload)
+		if err != nil {
+			fmt.Println("error:", err)
+		}
+		return nil
+	}))
 	//run indefinitely
 	select {}
 }
 
-// UploadAndDownloadData uploads the specified data to the specified key in the
-// specified bucket, using the specified Satellite, API key, and passphrase.
-func UploadAndDownloadData(ctx context.Context,
-	satelliteAddress, apiKey, passphrase, bucketName, uploadKey string,
-	dataToUpload []byte) error {
-
+// PrepareBucket check for a bucket, using the specified Satellite, API key, and passphrase.
+func PrepareBucket(ctx context.Context, satelliteAddress, apiKey, passphrase, bucketName string) (*uplink.Project, error) {
 	// Request access grant to the satellite with the API key and passphrase.
 	myConfig := uplink.Config{
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -47,35 +64,30 @@ func UploadAndDownloadData(ctx context.Context,
 	}
 	access, err := myConfig.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
 	if err != nil {
-		return fmt.Errorf("could not request access grant: %v", err)
+		return nil, fmt.Errorf("could not request access grant: %v", err)
 	}
 	fmt.Println("\n\n>>> access grant requested successfully <<<\n")
-	/*
-		access, err := uplink.RequestAccessWithPassphrase(ctx, satelliteAddress, apiKey, passphrase)
-		if err != nil {
-			return fmt.Errorf("could not request access grant: %v", err)
-		}
-	*/
-
 	// Open up the Project we will be working with.
 	project, err := myConfig.OpenProject(ctx, access)
 	if err != nil {
-		return fmt.Errorf("could not open project: %v", err)
+		return nil, fmt.Errorf("could not open project: %v", err)
 	}
-	defer project.Close()
-
 	// Ensure the desired Bucket within the Project is created.
 	_, err = project.EnsureBucket(ctx, bucketName)
 	if err != nil {
-		return fmt.Errorf("could not ensure bucket: %v", err)
+		return nil, fmt.Errorf("could not ensure bucket: %v", err)
 	}
+	return project, nil
+}
 
+// UploadData uploads the specified data to the specified key in the
+// specified bucket, using the specified Satellite, API key, and passphrase.
+func UploadData(ctx context.Context, project *uplink.Project, bucketName string, uploadKey string, dataToUpload []byte) error {
 	// Intitiate the upload of our Object to the specified bucket and key.
 	upload, err := project.UploadObject(ctx, bucketName, uploadKey, nil)
 	if err != nil {
 		return fmt.Errorf("could not initiate upload: %v", err)
 	}
-
 	// Copy the data to the upload.
 	buf := bytes.NewBuffer(dataToUpload)
 	_, err = io.Copy(upload, buf)
@@ -83,33 +95,34 @@ func UploadAndDownloadData(ctx context.Context,
 		_ = upload.Abort()
 		return fmt.Errorf("could not upload data: %v", err)
 	}
-
 	// Commit the uploaded object.
 	err = upload.Commit()
 	if err != nil {
 		return fmt.Errorf("could not commit uploaded object: %v", err)
 	}
+	return nil
+}
 
+// DownloadData uploads the specified data to the specified key in the
+// specified bucket, using the specified Satellite, API key, and passphrase.
+func DownloadData(ctx context.Context, project *uplink.Project, bucketName string, uploadKey string, dataToUpload []byte) ([]byte, error) {
 	// Initiate a download of the same object again
 	download, err := project.DownloadObject(ctx, bucketName, uploadKey, nil)
 	if err != nil {
-		return fmt.Errorf("could not open object: %v", err)
+		return nil, fmt.Errorf("could not open object: %v", err)
 	}
 	defer download.Close()
-
 	// Read everything from the download stream
 	receivedContents, err := ioutil.ReadAll(download)
 	if err != nil {
-		return fmt.Errorf("could not read data: %v", err)
+		return nil, fmt.Errorf("could not read data: %v", err)
 	}
-
 	// Check that the downloaded data is the same as the uploaded data.
 	if !bytes.Equal(receivedContents, dataToUpload) {
-		return fmt.Errorf("got different object back: %q != %q", dataToUpload, receivedContents)
+		return nil, fmt.Errorf("got different object back: %q != %q", dataToUpload, receivedContents)
 	}
 	fmt.Printf("**** got back \"%s\" ****\n", string(receivedContents))
-
-	return nil
+	return receivedContents, err
 }
 
 //JsConn is a javascript thing
@@ -128,19 +141,19 @@ func NewJsConn(ip string, port int) (*JsConn, error) {
 	var socketID, resultCode js.Value
 	var err error
 	js.Global().Call("dialContext", ip, port,
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		socketID = args[0]
-		resultCode = args[1]
-		fmt.Printf("connection created (Go) #%d\n", socketID.Int())
-		close(creating)
-		return nil
-	}),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		fmt.Println("failed to create socket connection")
-		err = fmt.Errorf("could not create socket connection")
-		close(creating)
-		return nil
-	}))
+		js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			socketID = args[0]
+			resultCode = args[1]
+			fmt.Printf("connection created (Go) #%d\n", socketID.Int())
+			close(creating)
+			return nil
+		}),
+		js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			fmt.Println("failed to create socket connection")
+			err = fmt.Errorf("could not create socket connection")
+			close(creating)
+			return nil
+		}))
 	<-creating
 	if err != nil {
 		return nil, err
@@ -154,19 +167,19 @@ func (c *JsConn) Read(b []byte) (n int, err error) {
 	fmt.Println("read start (Go)")
 	var retVal, eof js.Value
 	js.Global().Call("readSocket", c.id, len(b),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		retVal = args[0]
-		eof = args[1]
-		fmt.Printf("read close (Go) #%d\n", c.id)
-		close(reading)
-		return nil
-	}),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		fmt.Println("failed to read from socket connection")
-		err = fmt.Errorf("could not read from socket connection")
-		close(reading)
-		return nil
-	}))
+		js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			retVal = args[0]
+			eof = args[1]
+			fmt.Printf("read close (Go) #%d\n", c.id)
+			close(reading)
+			return nil
+		}),
+		js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			fmt.Println("failed to read from socket connection")
+			err = fmt.Errorf("could not read from socket connection")
+			close(reading)
+			return nil
+		}))
 	<-reading
 	if err != nil {
 		return 0, err
@@ -188,16 +201,16 @@ func (c *JsConn) Write(b []byte) (n int, err error) {
 
 	writing := make(chan struct{})
 	js.Global().Call("writeSocket", c.id, buf,
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		close(writing)
-		return nil
-	}),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		fmt.Println("failed to write to socket connection")
-		err = fmt.Errorf("could not write to socket connection")
-		close(writing)
-		return nil
-	}))
+		js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			close(writing)
+			return nil
+		}),
+		js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			fmt.Println("failed to write to socket connection")
+			err = fmt.Errorf("could not write to socket connection")
+			close(writing)
+			return nil
+		}))
 	<-writing
 	if err != nil {
 		return 0, err
