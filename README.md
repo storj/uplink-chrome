@@ -6,7 +6,7 @@ This repo shows how WebAssembly may be used along with a custom JS network adapt
 
 The Storj Uplink client currently cannot run in a typical browser (though tools like Gateway facilitate this). 
 This is because browsers do not allow opening TCP / UDP sockets, as this is generally considered to be a security vulnerability. 
-A Chrome 'App', however, is comes with a manifest that allows it to request permission to use sockets.
+A Chrome 'App', however, comes with a manifest that allows it to request permission to use sockets.
 
 # How to build WebAssembly
 
