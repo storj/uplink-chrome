@@ -8,9 +8,13 @@ The Storj Uplink client currently cannot run in a typical browser (though tools 
 This is because browsers do not allow opening TCP / UDP sockets, as this is generally considered to be a security vulnerability. 
 A Chrome 'App', however, comes with a manifest that allows it to request permission to use sockets.
 
-# How to build WebAssembly
+# How to build Go into WebAssembly
 
 Just run `GOOS=js GOARCH=wasm go build -o main.wasm main.go`
+
+# Configure
+
+Update `apikey`, `satellite`, and `passphrase` in sockets.js.
 
 # How to run / debug the Chrome App
 
