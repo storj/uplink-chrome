@@ -10,7 +10,7 @@ A Chrome 'App', however, comes with a manifest that allows it to request permiss
 
 # How to build Go into WebAssembly
 
-Just run `GOOS=js GOARCH=wasm go build -o main.wasm main.go`
+Just run `GOOS=js GOARCH=wasm go build -o main.wasm main.go` or `make build`
 
 # Configure
 
