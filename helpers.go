@@ -9,7 +9,7 @@ import (
 	"syscall/js"
 )
 
-// funcToJS automatically wraps fn in js.Func type.
+// funcToJs automatically wraps fn in js.Func type.
 //
 // It checks fn to ensure that only accepts parameters of types that are
 // convertible from Js to Go, it returns 0 or one value. It optionally supports
@@ -20,7 +20,7 @@ import (
 // The js.Func returned automatically checks on each Js function call that the
 // expected number of parameters and types are passed otherwise it panics with
 // an specific message.
-func funcToJS(fn interface{}) (js.Func, error) {
+func funcToJs(fn interface{}) (js.Func, error) {
 	// First of all, check that fn fulfills the conditions for being callable from
 	// the Js world
 	fnType := reflect.TypeOf(fn)
@@ -50,7 +50,7 @@ func funcToJS(fn interface{}) (js.Func, error) {
 			case reflect.String:
 			default:
 				return js.Func{}, fmt.Errorf(
-					"'fn' %d parameter is of a type not convertible from JS", i,
+					"'fn' %d parameter is of a type not convertible from Js", i,
 				)
 			}
 		}
@@ -58,23 +58,34 @@ func funcToJS(fn interface{}) (js.Func, error) {
 
 	if fnType.NumOut() > 1 {
 		return js.Func{}, errors.New(
-			"fn cannot return more than 1 parameter because JS can only returns 0 or 1",
+			"fn cannot return more than 1 parameter because Js can only returns 0 or 1",
 		)
 	}
 
 	if fnType.NumOut() == 1 {
-		switch fnType.Out(0).Kind() {
+		switch ot := fnType.Out(0); ot.Kind() {
 		case reflect.Bool:
 		case reflect.Float32, reflect.Float64:
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		case reflect.String:
+		case reflect.Map:
+			if ot.Key().Kind() != reflect.String {
+				return js.Func{}, errors.New("'fn' returns a map with not keys String type, Js only supports map[string]interface{}")
+			}
+			if el := ot.Elem(); el.Kind() != reflect.Interface || el.NumMethod() != 0 {
+				return js.Func{}, errors.New("'fn' returns a map of values of not empty interface type, Js only supports map[string]interface{}")
+			}
+		case reflect.Slice:
+			if el := ot.Elem(); el.Kind() != reflect.Interface || el.NumMethod() != 0 {
+				return js.Func{}, errors.New("'fn' returns a slice of values of not empty interface type, Js only supports []interface{}")
+			}
 		default:
-			return js.Func{}, errors.New("'fn' return parameter is of a type not convertible to JS")
+			return js.Func{}, errors.New("'fn' return parameter is of a type not convertible to Js")
 		}
 	}
 
-	// create JS function
+	// create Js function
 	fnVal := reflect.ValueOf(fn)
 	return js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		var in []reflect.Value
@@ -180,6 +191,8 @@ func funcToJS(fn interface{}) (js.Func, error) {
 				return out.Uint()
 			case reflect.String:
 				return out.String()
+			default:
+				return out.Interface()
 			}
 		}
 
