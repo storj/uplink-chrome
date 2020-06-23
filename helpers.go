@@ -9,12 +9,22 @@ import (
 	"syscall/js"
 )
 
+// JSThis is a type to identify that a function wrapped to Javascript accepts
+// the Js this object as a first argument.
+type JSThis js.Value
+
+// JSValue gets the original js.Value from jt satisfying the js.Warpper
+// interface.
+func (jt JSThis) JSValue() js.Value {
+	return js.Value(jt)
+}
+
 // funcToJs automatically wraps fn in js.Func type.
 //
 // It checks fn to ensure that only accepts parameters of types that are
 // convertible from Js to Go, it returns 0 or one value. It optionally supports
 // to receive the 'this' Js parameter, with the condition that fn has to receive
-// as a first parameter a value of the type js.Value.
+// as a first parameter a value of the type JSThis.
 // If any of these checks fails, it returns an error with a specific message.
 //
 // The js.Func returned automatically checks on each Js function call that the
@@ -36,7 +46,7 @@ func funcToJs(fn interface{}) (js.Func, error) {
 	if fnNumParamsIn > 0 {
 		i := 0
 		// check if the first fn argument is of the type jsThis
-		if fnType.In(0).Name() == reflect.TypeOf(js.Value{}).Name() {
+		if isJSThisType(fnType.In(0)) {
 			useThis = true
 			i++
 		}
@@ -48,6 +58,12 @@ func funcToJs(fn interface{}) (js.Func, error) {
 			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			case reflect.String:
+			case reflect.Struct:
+				if !isJsValueType(fnType.In(i)) {
+					return js.Func{}, fmt.Errorf(
+						"'fn' %d parameter is of a type not convertible from Js", i,
+					)
+				}
 			default:
 				return js.Func{}, fmt.Errorf(
 					"'fn' %d parameter is of a type not convertible from Js", i,
@@ -99,7 +115,7 @@ func funcToJs(fn interface{}) (js.Func, error) {
 		}
 
 		if useThis {
-			in = append(in, reflect.ValueOf(this))
+			in = append(in, reflect.ValueOf(JSThis(this)))
 		}
 
 		// start fn params at index 1 if useThis is true otherwise at index 0
@@ -175,6 +191,11 @@ func funcToJs(fn interface{}) (js.Func, error) {
 					panic(fmt.Sprintf("argument %d must be of type string", i))
 				}
 				in = append(in, reflect.ValueOf(args[i].String()))
+			case reflect.Struct:
+				if args[i].Type() != js.TypeObject {
+					panic(fmt.Sprintf("argument %d must be of type object or array", i))
+				}
+				in = append(in, reflect.ValueOf(args[i]))
 			}
 		}
 
@@ -198,4 +219,16 @@ func funcToJs(fn interface{}) (js.Func, error) {
 
 		return nil
 	}), nil
+}
+
+func isJsValueType(t reflect.Type) bool {
+	jst := reflect.TypeOf(js.Value{})
+
+	return t.Name() == jst.Name() && t.PkgPath() == jst.PkgPath()
+}
+
+func isJSThisType(t reflect.Type) bool {
+	thist := reflect.TypeOf(JSThis{})
+
+	return t.Name() == thist.Name() && t.PkgPath() == thist.PkgPath()
 }
