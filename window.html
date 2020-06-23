@@ -5,11 +5,16 @@
 </head>
 
 <body>
-  Hello Go!<br />
+  <input type="file" id="file-upload" multiple size="50">
+  <p id="output"></p>
+  <br>
+  <input type="button" id="file-download" value="download">
+
   <script src="net_errs.js"></script>
   <script src="sockets.js"></script>
   <script src="wasm_exec.js"></script>
   <script src="run_wasm.js"></script>
+  <script src="file_ui.js"></script>
 </body>
 
 </html>
