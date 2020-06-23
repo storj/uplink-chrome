@@ -26,8 +26,16 @@ func main() {
 	if err != nil {
 		fmt.Println("error:", err)
 	}
+
 	//run indefinitely
-	select {}
+	done := make(chan struct{})
+	jsClose := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		close(done)
+		return nil
+	})
+	defer jsClose.Release()
+	js.Global().Get("addEventListener").Invoke("beforeclose", jsClose)
+	<-done
 }
 
 // UploadAndDownloadData uploads the specified data to the specified key in the
@@ -125,22 +133,23 @@ var uint8Array = js.Global().Get("Uint8Array")
 func NewJsConn(ip string, port int) (*JsConn, error) {
 	creating := make(chan struct{})
 	fmt.Println("connect start (Go)")
-	var socketID, resultCode js.Value
+	var socketID js.Value
 	var err error
-	js.Global().Call("dialContext", ip, port,
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	ok := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		socketID = args[0]
-		resultCode = args[1]
 		fmt.Printf("connection created (Go) #%d\n", socketID.Int())
 		close(creating)
 		return nil
-	}),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	})
+	defer ok.Release()
+	fail := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		fmt.Println("failed to create socket connection")
 		err = fmt.Errorf("could not create socket connection")
 		close(creating)
 		return nil
-	}))
+	})
+	defer fail.Release()
+	js.Global().Call("dialContext", ip, port, ok, fail)
 	<-creating
 	if err != nil {
 		return nil, err
@@ -153,20 +162,22 @@ func (c *JsConn) Read(b []byte) (n int, err error) {
 	reading := make(chan struct{})
 	fmt.Println("read start (Go)")
 	var retVal, eof js.Value
-	js.Global().Call("readSocket", c.id, len(b),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	ok := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		retVal = args[0]
 		eof = args[1]
 		fmt.Printf("read close (Go) #%d\n", c.id)
 		close(reading)
 		return nil
-	}),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	})
+	defer ok.Release()
+	fail := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		fmt.Println("failed to read from socket connection")
 		err = fmt.Errorf("could not read from socket connection")
 		close(reading)
 		return nil
-	}))
+	})
+	defer fail.Release()
+	js.Global().Call("readSocket", c.id, len(b), ok, fail)
 	<-reading
 	if err != nil {
 		return 0, err
@@ -187,17 +198,19 @@ func (c *JsConn) Write(b []byte) (n int, err error) {
 	js.CopyBytesToJS(buf, b)
 
 	writing := make(chan struct{})
-	js.Global().Call("writeSocket", c.id, buf,
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	ok := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		close(writing)
 		return nil
-	}),
-	js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	})
+	defer ok.Release()
+	fail := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		fmt.Println("failed to write to socket connection")
 		err = fmt.Errorf("could not write to socket connection")
 		close(writing)
 		return nil
-	}))
+	})
+	defer fail.Release()
+	js.Global().Call("writeSocket", c.id, buf, ok, fail)
 	<-writing
 	if err != nil {
 		return 0, err
@@ -209,10 +222,12 @@ func (c *JsConn) Close() error {
 	fmt.Println("closing socket (Go)")
 
 	closing := make(chan struct{})
-	js.Global().Call("closeSocket", c.id, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	ok := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		close(closing)
 		return nil
-	}))
+	})
+	defer ok.Release()
+	js.Global().Call("closeSocket", c.id, ok)
 	<-closing
 	return nil
 }
