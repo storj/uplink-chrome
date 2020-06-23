@@ -6,6 +6,18 @@ downloadButton.addEventListener("click", downloadFile);
 let fileData;
 let toDownload;
 let downloadName;
+let bucketName = "my-bucket";
+let fileName = "";
+
+let uploadCallback;
+function setUploadCallback(cb) {
+    uploadCallback = cb
+}
+
+let downloadCallback;
+function setDownloadCallback(cb) {
+    downloadCallback = cb
+}
 
 function uploadFile() {
     console.log("uploading file")
@@ -20,11 +32,28 @@ function uploadFile() {
                 fileData = new Blob([file])
                 if ('name' in file) {
                     txt += "name: " + file.name + "<br>";
-                    downloadName = file.name;
+                    fileName = file.name;
                 }
                 if ('size' in file) {
                     txt += "size: " + file.size + " bytes <br>";
                 }
+                let promise = new Promise(function (resolve) {
+                    let reader = new FileReader();
+                    reader.readAsArrayBuffer(fileData);
+                    reader.onload = function () {
+                        let arrayBuffer = reader.result;
+                        let bytes = new Uint8Array(arrayBuffer);
+                        resolve(bytes);
+                    }
+                }).then(function (data) {
+                    console.log("passing data from js to go for upload: " + data.length)
+                    uploadCallback(bucketName, fileName, data, function () {
+                        console.log("successfully uploaded file from JS")
+                    })
+                }).catch(function (err) {
+                    console.log('error: ' + err);
+                });
+
             }
         }
     } else {
@@ -36,21 +65,6 @@ function uploadFile() {
         }
     }
     document.getElementById("output").innerHTML = txt;
-
-    let promise = new Promise(function (resolve) {
-        let reader = new FileReader();
-        reader.readAsArrayBuffer(fileData);
-        reader.onload = function () {
-            let arrayBuffer = reader.result;
-            let bytes = new Uint8Array(arrayBuffer);
-            resolve(bytes);
-        }
-    }).then(function (data) {
-        console.log('file data' + data.toString());
-        toDownload = data
-    }).catch(function (err) {
-        console.log('error: ' + err);
-    });
 }
 
 var downloadBlob, downloadURL;
@@ -80,7 +94,10 @@ downloadURL = function (data, fileName) {
 
 function downloadFile() {
     console.log("downloading file")
-    if (!!toDownload) {
-        downloadBlob(toDownload, downloadName, 'application/octet-stream');
+    if (fileName != "") {
+        downloadCallback(bucketName, fileName, function (data) {
+            downloadBlob(data, fileName, 'application/octet-stream');
+            console.log("successfully downloaded file from JS")
+        })
     }
 }
